@@ -13,7 +13,8 @@ class GenerateMiddlewareCommand extends Command
                             {--role= : Role to check (e.g., admin, manager, user)}
                             {--message= : Custom error message}
                             {--code=403 : HTTP status code}
-                            {--field=role : User field to check (e.g., role, type, level)}';
+                            {--field=role : User field to check (e.g., role, type, level)}
+                            {--boolean : Use boolean field (e.g., is_admin=true instead of role=admin)}';
 
     protected $description = 'Generate custom middleware with role-based authentication';
 
@@ -23,11 +24,12 @@ class GenerateMiddlewareCommand extends Command
         $role = $this->option('role') ?: strtolower($name);
         $code = (int)$this->option('code');
         $field = $this->option('field');
+        $isBoolean = $this->option('boolean');
 
         $this->info("🚀 Starting {$name} Middleware Generation...");
 
         try {
-            $this->showGenerationInfo($name, $role, $code, $field);
+            $this->showGenerationInfo($name, $role, $code, $field, $isBoolean);
 
             if (!$this->confirm('Do you want to continue with the generation?')) {
                 $this->info('❌ Generation cancelled.');
@@ -36,7 +38,7 @@ class GenerateMiddlewareCommand extends Command
 
             $message = $this->getMessageChoice($role);
 
-            $this->createMiddleware($name, $role, $message, $code, $field);
+            $this->createMiddleware($name, $role, $message, $code, $field, $isBoolean);
 
             $this->updateKernel($name);
 
@@ -44,7 +46,7 @@ class GenerateMiddlewareCommand extends Command
 
             $this->createRouteExample($name, $role);
 
-            $this->showSuccessSummary($name, $role, $message, $code, $field);
+            $this->showSuccessSummary($name, $role, $message, $code, $field, $isBoolean);
 
         } catch (Exception $e) {
             $this->error('❌ Error during middleware generation: ' . $e->getMessage());
@@ -54,12 +56,20 @@ class GenerateMiddlewareCommand extends Command
         return 0;
     }
 
-    protected function showGenerationInfo($name, $role, $code, $field)
+    protected function showGenerationInfo($name, $role, $code, $field, $isBoolean)
     {
         $this->info("\n📋 Generation Summary:");
         $this->line("───────────────────────");
         $this->info("🔹 Middleware Name: {$name}");
-        $this->info("🔹 Role Check: '{$role}'");
+
+        if ($isBoolean) {
+            $this->info("🔹 Field Check: '{$field}' = true");
+            $this->info("🔹 Type: Boolean field");
+        } else {
+            $this->info("🔹 Role Check: '{$role}'");
+            $this->info("🔹 Type: Role-based");
+        }
+
         $this->info("🔹 Status Code: {$code}");
         $this->info("🔹 User Field: '{$field}'");
         $this->line("───────────────────────");
@@ -122,7 +132,7 @@ class GenerateMiddlewareCommand extends Command
         }
     }
 
-    protected function createMiddleware($name, $role, $message, $code, $field)
+    protected function createMiddleware($name, $role, $message, $code, $field, $isBoolean = false)
     {
         $this->info("\n📁 Creating Middleware File...");
 
@@ -141,7 +151,7 @@ class GenerateMiddlewareCommand extends Command
             }
         }
 
-        $middlewareContent = $this->buildMiddlewareContent($name, $role, $message, $code, $field);
+        $middlewareContent = $this->buildMiddlewareContent($name, $role, $message, $code, $field, $isBoolean);
 
         if (File::put($middlewarePath, $middlewareContent) === false) {
             throw new Exception("Failed to create middleware file: {$middlewarePath}");
@@ -150,8 +160,17 @@ class GenerateMiddlewareCommand extends Command
         $this->info("✅ Created middleware: {$name}.php");
     }
 
-    protected function buildMiddlewareContent($name, $role, $message, $code, $field)
+    protected function buildMiddlewareContent($name, $role, $message, $code, $field, $isBoolean = false)
     {
+        // بناء الشرط بناءً على نوع الحقل
+        if ($isBoolean) {
+            $condition = "\$request->user() && \$request->user()->{$field} === true";
+            $comment = "Check if user has {$field} = true";
+        } else {
+            $condition = "\$request->user() && \$request->user()->{$field} === '{$role}'";
+            $comment = "Check if user has {$field} = '{$role}'";
+        }
+
         return "<?php
 
 namespace App\Http\Middleware;
@@ -169,7 +188,8 @@ class {$name}
      */
     public function handle(Request \$request, Closure \$next): Response
     {
-        if (\$request->user() && \$request->user()->{$field} === '{$role}') {
+        // {$comment}
+        if ({$condition}) {
             return \$next(\$request);
         }
 
@@ -392,7 +412,7 @@ class {$name}
         }
     }
 
-    protected function showSuccessSummary($name, $role, $message, $code, $field)
+    protected function showSuccessSummary($name, $role, $message, $code, $field, $isBoolean = false)
     {
         $middlewareName = $this->getMiddlewareName($name);
 
@@ -400,7 +420,15 @@ class {$name}
         $this->line("═══════════════════════════════════════");
         $this->info("📋 Final Configuration:");
         $this->line("   • Middleware: {$name}");
-        $this->line("   • Role: '{$role}'");
+
+        if ($isBoolean) {
+            $this->line("   • Field Check: '{$field}' = true");
+            $this->line("   • Type: Boolean field");
+        } else {
+            $this->line("   • Role: '{$role}'");
+            $this->line("   • Type: Role-based");
+        }
+
         $this->line("   • Field: '{$field}'");
         $this->line("   • Status Code: {$code}");
         $this->line("   • Error Message: '{$message}'");
