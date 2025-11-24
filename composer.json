@@ -1,0 +1,22 @@
+{
+    "name": "amranibrahem/laravel-middleware-generator",
+    "description": "Auto generate Laravel middleware with role-based authentication",
+    "type": "library",
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "AmranIbrahem\\MiddlewareGenerator\\": "src/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "AmranIbrahem\\MiddlewareGenerator\\MiddlewareGeneratorServiceProvider"
+            ]
+        }
+    },
+    "require": {
+        "php": "^8.0",
+        "laravel/framework": "^9.0|^10.0"
+    }
+}
