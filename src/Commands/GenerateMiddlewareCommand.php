@@ -307,19 +307,21 @@ class {$name}
 
         $content = File::get($authPath);
 
+        // التحقق إذا كان الـ role موجود مسبقاً
         if (str_contains($content, "'{$role}' =>")) {
             $this->info("✅ Role already exists in auth.php");
             return;
         }
 
-        $guardsFound = false;
+        $guardsUpdated = false;
 
-        if (preg_match('/(\'guards\'\s*=>\s*\[)([^\]]*)(\],)/s', $content, $matches)) {
-            $guardsFound = true;
+        // المحاولة 1: البحث عن guards section
+        if (preg_match('/(\'guards\'\s*=>\s*\[)([^\]]*?)(\],)/s', $content, $matches)) {
             $before = $matches[1];
             $guardsList = $matches[2];
             $after = $matches[3];
 
+            // إضافة الـ guard الجديد
             $newGuardsList = $guardsList;
             if (!empty(trim($guardsList))) {
                 $newGuardsList .= "\n        ";
@@ -327,33 +329,42 @@ class {$name}
             $newGuardsList .= "'{$role}' => [\n            'driver' => 'session',\n            'provider' => 'users',\n        ],";
 
             $newContent = str_replace($matches[0], $before . $newGuardsList . $after, $content);
+            $guardsUpdated = true;
         }
+        // المحاولة 2: إذا لم يتم العثور، نضيف قسم guards كاملاً
         else {
-            $this->warn("⚠️ Could not find guards section in auth.php, adding it manually...");
+            $this->info("🔧 Adding guards section to auth.php...");
 
-            if (preg_match('/(return\s+\[)([\s\S]*?)(\];)/', $content, $matches)) {
+            // البحث عن return array
+            if (preg_match('/(return\s+\[)([\s\S]*?)(\];\s*}$)/s', $content, $matches)) {
                 $before = $matches[1];
                 $configArray = $matches[2];
                 $after = $matches[3];
 
                 $guardsCode = "\n    'guards' => [\n        '{$role}' => [\n            'driver' => 'session',\n            'provider' => 'users',\n        ],\n        'web' => [\n            'driver' => 'session',\n            'provider' => 'users',\n        ],\n    ],";
 
-                if (!str_contains($configArray, "'guards'")) {
-                    $newConfigArray = $configArray . $guardsCode;
-                    $newContent = str_replace($matches[0], $before . $newConfigArray . $after, $content);
-                    $guardsFound = true;
-                }
+                // إضافة guards قبل النهاية
+                $newConfigArray = $configArray . $guardsCode;
+                $newContent = str_replace($matches[0], $before . $newConfigArray . $after, $content);
+                $guardsUpdated = true;
             }
         }
 
-        if ($guardsFound && isset($newContent)) {
+        if ($guardsUpdated && isset($newContent)) {
             if (File::put($authPath, $newContent) !== false) {
                 $this->info("✅ Added role guard to auth.php");
             } else {
-                $this->warn("⚠️ Could not update auth.php");
+                $this->warn("⚠️ Could not update auth.php - permission issue");
             }
         } else {
-            $this->warn("⚠️ Could not find or create guards section in auth.php");
+            $this->warn("⚠️ Could not update auth.php configuration");
+            $this->info("💡 You can manually add this to config/auth.php:");
+            $this->line("'guards' => [");
+            $this->line("    '{$role}' => [");
+            $this->line("        'driver' => 'session',");
+            $this->line("        'provider' => 'users',");
+            $this->line("    ],");
+            $this->line("],");
         }
     }
 
