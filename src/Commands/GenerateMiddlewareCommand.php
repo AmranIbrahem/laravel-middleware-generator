@@ -194,15 +194,17 @@ class {$name}
         $content = File::get($kernelPath);
         $middlewareName = $this->getMiddlewareName($name);
 
+        // التحقق إذا كان الميدلوير مسجل مسبقاً
         if (str_contains($content, "'{$middlewareName}' =>")) {
             $this->info("✅ Middleware already registered in Kernel.php");
             return;
         }
 
-        $routeMiddlewareFound = false;
+        $middlewareRegistered = false;
 
-        if (preg_match('/(protected\s+\$routeMiddleware\s*=\s*\[)([^\]]*)(\];)/s', $content, $matches)) {
-            $routeMiddlewareFound = true;
+        // المحاولة 1: البحث في $middlewareAliases (لإصدارات Laravel الحديثة)
+        if (preg_match('/(protected\s+\$middlewareAliases\s*=\s*\[)([^\]]*)(\];)/s', $content, $matches)) {
+            $middlewareRegistered = true;
             $before = $matches[1];
             $middlewareList = $matches[2];
             $after = $matches[3];
@@ -214,43 +216,79 @@ class {$name}
             $newMiddlewareList .= "'{$middlewareName}' => \\App\\Http\\Middleware\\{$name}::class,";
 
             $newContent = str_replace($matches[0], $before . $newMiddlewareList . $after, $content);
-        }
 
-        elseif (preg_match('/(\$routeMiddleware\s*=\s*\[)([^\]]*)(\];)/s', $content, $matches)) {
-            $routeMiddlewareFound = true;
-            $before = $matches[1];
-            $middlewareList = $matches[2];
-            $after = $matches[3];
-
-            $newMiddlewareList = $middlewareList;
-            if (!empty(trim($middlewareList))) {
-                $newMiddlewareList .= "\n        ";
-            }
-            $newMiddlewareList .= "'{$middlewareName}' => \\App\\Http\\Middleware\\{$name}::class,";
-
-            $newContent = str_replace($matches[0], $before . $newMiddlewareList . $after, $content);
-        }
-        else {
-            $this->warn("⚠️ Could not find routeMiddleware array in Kernel.php, adding it manually...");
-
-            if (preg_match('/(class\s+Kernel\s+extends\s+[^{]+\{[\s\S]*?)(protected\s+\$middleware\s*=)/', $content, $matches)) {
-                $before = $matches[1];
-                $after = $matches[2];
-
-                $routeMiddlewareCode = "    protected \$routeMiddleware = [\n        '{$middlewareName}' => \\App\\Http\\Middleware\\{$name}::class,\n    ];\n\n    ";
-                $newContent = str_replace($matches[0], $before . $routeMiddlewareCode . $after, $content);
-                $routeMiddlewareFound = true;
-            }
-        }
-
-        if ($routeMiddlewareFound && isset($newContent)) {
             if (File::put($kernelPath, $newContent) !== false) {
-                $this->info("✅ Registered middleware in Kernel.php");
+                $this->info("✅ Registered middleware in Kernel.php (\$middlewareAliases)");
             } else {
                 $this->warn("⚠️ Could not register middleware in Kernel.php");
             }
-        } else {
-            $this->warn("⚠️ Could not find or create routeMiddleware array in Kernel.php");
+            return;
+        }
+
+        // المحاولة 2: البحث في $routeMiddleware (لإصدارات Laravel القديمة)
+        if (preg_match('/(protected\s+\$routeMiddleware\s*=\s*\[)([^\]]*)(\];)/s', $content, $matches)) {
+            $middlewareRegistered = true;
+            $before = $matches[1];
+            $middlewareList = $matches[2];
+            $after = $matches[3];
+
+            $newMiddlewareList = $middlewareList;
+            if (!empty(trim($middlewareList))) {
+                $newMiddlewareList .= "\n        ";
+            }
+            $newMiddlewareList .= "'{$middlewareName}' => \\App\\Http\\Middleware\\{$name}::class,";
+
+            $newContent = str_replace($matches[0], $before . $newMiddlewareList . $after, $content);
+
+            if (File::put($kernelPath, $newContent) !== false) {
+                $this->info("✅ Registered middleware in Kernel.php (\$routeMiddleware)");
+            } else {
+                $this->warn("⚠️ Could not register middleware in Kernel.php");
+            }
+            return;
+        }
+
+        // المحاولة 3: البحث بدون protected
+        if (preg_match('/(\$middlewareAliases\s*=\s*\[)([^\]]*)(\];)/s', $content, $matches)) {
+            $middlewareRegistered = true;
+            $before = $matches[1];
+            $middlewareList = $matches[2];
+            $after = $matches[3];
+
+            $newMiddlewareList = $middlewareList;
+            if (!empty(trim($middlewareList))) {
+                $newMiddlewareList .= "\n        ";
+            }
+            $newMiddlewareList .= "'{$middlewareName}' => \\App\\Http\\Middleware\\{$name}::class,";
+
+            $newContent = str_replace($matches[0], $before . $newMiddlewareList . $after, $content);
+
+            if (File::put($kernelPath, $newContent) !== false) {
+                $this->info("✅ Registered middleware in Kernel.php (\$middlewareAliases)");
+            } else {
+                $this->warn("⚠️ Could not register middleware in Kernel.php");
+            }
+            return;
+        }
+
+        // المحاولة 4: إذا لم يتم العثور على أي منهما، نضيف $middlewareAliases يدوياً
+        $this->warn("⚠️ Could not find middlewareAliases or routeMiddleware array in Kernel.php, adding it manually...");
+
+        if (preg_match('/(class\s+Kernel\s+extends\s+[^{]+\{[\s\S]*?)(protected\s+\$middleware\s*=)/', $content, $matches)) {
+            $before = $matches[1];
+            $after = $matches[2];
+
+            $middlewareAliasesCode = "    protected \$middlewareAliases = [\n        '{$middlewareName}' => \\App\\Http\\Middleware\\{$name}::class,\n    ];\n\n    ";
+            $newContent = str_replace($matches[0], $before . $middlewareAliasesCode . $after, $content);
+
+            if (File::put($kernelPath, $newContent) !== false) {
+                $this->info("✅ Created \$middlewareAliases and registered middleware in Kernel.php");
+                $middlewareRegistered = true;
+            }
+        }
+
+        if (!$middlewareRegistered) {
+            $this->warn("⚠️ Could not find or create middleware arrays in Kernel.php");
             $this->warn("💡 Please manually register the middleware in app/Http/Kernel.php:");
             $this->line("'{$middlewareName}' => \\App\\Http\\Middleware\\{$name}::class,");
         }
