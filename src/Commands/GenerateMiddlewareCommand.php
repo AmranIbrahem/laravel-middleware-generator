@@ -21,34 +21,32 @@ class GenerateMiddlewareCommand extends Command
     {
         $name = $this->argument('name');
         $role = $this->option('role') ?: strtolower($name);
-        $message = $this->option('message') ?: $this->getDefaultMessage($role);
         $code = (int)$this->option('code');
         $field = $this->option('field');
 
-        $this->info("🚀 Generating {$name} middleware...");
+        $this->info("🚀 Starting {$name} Middleware Generation...");
 
         try {
-            // 1. إنشاء الميدلوير
+            // عرض المعلومات التوضيحية أولاً
+            $this->showGenerationInfo($name, $role, $code, $field);
+
+            // طلب التأكيد قبل المتابعة
+            if (!$this->confirm('Do you want to continue with the generation?')) {
+                $this->info('❌ Generation cancelled.');
+                return 0;
+            }
+
+            $message = $this->getMessageChoice($role);
+
             $this->createMiddleware($name, $role, $message, $code, $field);
 
-            // 2. تحديث Kernel.php
             $this->updateKernel($name);
 
-            // 3. تحديث auth.php
             $this->updateAuthConfig($role);
 
-            // 4. إنشاء مثال للـ routes
             $this->createRouteExample($name, $role);
 
-            $this->info("✅ Middleware {$name} generated successfully!");
-            $this->info("👤 Role: {$role}");
-            $this->info("📝 Message: {$message}");
-            $this->info("🔢 Status Code: {$code}");
-            $this->info("🏷️ Field: {$field}");
-            $this->info("\n💡 Usage example:");
-            $this->info("Route::middleware('{$this->getMiddlewareName($name)}')->group(function () {");
-            $this->info("    // Your protected routes here");
-            $this->info("});");
+            $this->showSuccessSummary($name, $role, $message, $code, $field);
 
         } catch (Exception $e) {
             $this->error('❌ Error during middleware generation: ' . $e->getMessage());
@@ -58,17 +56,88 @@ class GenerateMiddlewareCommand extends Command
         return 0;
     }
 
+    protected function showGenerationInfo($name, $role, $code, $field)
+    {
+        $this->info("\n📋 Generation Summary:");
+        $this->line("───────────────────────");
+        $this->info("🔹 Middleware Name: {$name}");
+        $this->info("🔹 Role Check: '{$role}'");
+        $this->info("🔹 Status Code: {$code}");
+        $this->info("🔹 User Field: '{$field}'");
+        $this->line("───────────────────────");
+        $this->info("📁 Files that will be created/modified:");
+        $this->line("   • app/Http/Middleware/{$name}.php");
+        $this->line("   • app/Http/Kernel.php (registration)");
+        $this->line("   • config/auth.php (guard configuration)");
+        $this->line("   • routes/api.php (usage example)");
+        $this->line("───────────────────────");
+    }
+
+    protected function getMessageChoice($role)
+    {
+        $customMessage = $this->option('message');
+        if ($customMessage) {
+            return $customMessage;
+        }
+
+        $defaultMessages = [
+            'admin' => 'Administrator access required',
+            'manager' => 'Manager access required',
+            'user' => 'User access required',
+            'teacher' => 'Teacher access required',
+            'student' => 'Student access required',
+            'moderator' => 'Moderator access required',
+            'editor' => 'Editor access required',
+            'superadmin' => 'Super Administrator access required',
+            'customer' => 'Customer access required',
+            'vendor' => 'Vendor access required'
+        ];
+
+        $defaultMessage = $defaultMessages[$role] ?? "Access denied. {$role} role required";
+
+        $this->info("\n📝 Error Message Configuration:");
+        $this->line("───────────────────────");
+        $choices = [
+            "Default: {$defaultMessage}",
+            'Custom message',
+            'Simple: Access denied',
+            'Simple: Unauthorized access',
+            'Simple: Insufficient permissions'
+        ];
+
+        $choice = $this->choice('Select message type:', $choices, 0);
+
+        switch ($choice) {
+            case $choices[0]: // Default
+                return $defaultMessage;
+            case $choices[1]: // Custom
+                $this->info("💬 Enter your custom error message:");
+                return $this->ask('Message:');
+            case $choices[2]: // Simple: Access denied
+                return 'Access denied';
+            case $choices[3]: // Simple: Unauthorized access
+                return 'Unauthorized access';
+            case $choices[4]: // Simple: Insufficient permissions
+                return 'Insufficient permissions';
+            default:
+                return $defaultMessage;
+        }
+    }
+
     protected function createMiddleware($name, $role, $message, $code, $field)
     {
+        $this->info("\n📁 Creating Middleware File...");
+
         $middlewarePath = app_path('Http/Middleware/' . $name . '.php');
         $directory = dirname($middlewarePath);
 
         if (!File::exists($directory)) {
             File::makeDirectory($directory, 0755, true);
+            $this->info("✅ Created directory: Http/Middleware/");
         }
 
         if (File::exists($middlewarePath)) {
-            $overwrite = $this->confirm("Middleware {$name} already exists. Overwrite?");
+            $overwrite = $this->confirm("⚠️  Middleware {$name} already exists. Overwrite?", true);
             if (!$overwrite) {
                 throw new Exception('Middleware already exists and overwrite was cancelled.');
             }
@@ -80,13 +149,11 @@ class GenerateMiddlewareCommand extends Command
             throw new Exception("Failed to create middleware file: {$middlewarePath}");
         }
 
-        $this->info("✅ Created middleware: {$name}");
+        $this->info("✅ Created middleware: {$name}.php");
     }
 
     protected function buildMiddlewareContent($name, $role, $message, $code, $field)
     {
-        $messageJson = json_encode(['message' => $message]);
-
         return "<?php
 
 namespace App\Http\Middleware;
@@ -108,13 +175,17 @@ class {$name}
             return \$next(\$request);
         }
 
-        return response()->json({$messageJson}, {$code});
+        return response()->json([
+            'message' => '{$message}'
+        ], {$code});
     }
 }";
     }
 
     protected function updateKernel($name)
     {
+        $this->info("\n📝 Registering in Kernel...");
+
         $kernelPath = app_path('Http/Kernel.php');
 
         if (!File::exists($kernelPath)) {
@@ -125,18 +196,18 @@ class {$name}
         $content = File::get($kernelPath);
         $middlewareName = $this->getMiddlewareName($name);
 
-        // التحقق إذا كان الميدلوير مسجل مسبقاً
         if (str_contains($content, "'{$middlewareName}' =>")) {
             $this->info("✅ Middleware already registered in Kernel.php");
             return;
         }
 
-        // البحث عن مكان إضافة الميدلوير
-        if (str_contains($content, "protected \$routeMiddleware = [")) {
-            $search = "protected \$routeMiddleware = [";
-            $replace = "protected \$routeMiddleware = [\n        '{$middlewareName}' => \\App\\Http\\Middleware\\{$name}::class,";
+        $routeMiddlewarePattern = '/protected\s+\$routeMiddleware\s*=\s*\[([\s\S]*?)\];/';
 
-            $content = str_replace($search, $replace, $content);
+        if (preg_match($routeMiddlewarePattern, $content, $matches)) {
+            $currentMiddleware = $matches[1];
+            $newMiddleware = $currentMiddleware . "\n        '{$middlewareName}' => \\App\\Http\\Middleware\\{$name}::class,";
+
+            $content = str_replace($currentMiddleware, $newMiddleware, $content);
 
             if (File::put($kernelPath, $content) !== false) {
                 $this->info("✅ Registered middleware in Kernel.php");
@@ -144,12 +215,16 @@ class {$name}
                 $this->warn("⚠️ Could not register middleware in Kernel.php");
             }
         } else {
-            $this->warn("⚠️ Could not find routeMiddleware in Kernel.php");
+            $this->warn("⚠️ Could not find routeMiddleware array in Kernel.php");
+            $this->warn("💡 Please manually register the middleware in app/Http/Kernel.php:");
+            $this->line("'{$middlewareName}' => \\App\\Http\\Middleware\\{$name}::class,");
         }
     }
 
     protected function updateAuthConfig($role)
     {
+        $this->info("\n⚙️  Updating Auth Configuration...");
+
         $authPath = config_path('auth.php');
 
         if (!File::exists($authPath)) {
@@ -159,18 +234,18 @@ class {$name}
 
         $content = File::get($authPath);
 
-        // التحقق إذا كان الـ role موجود مسبقاً
         if (str_contains($content, "'{$role}' =>")) {
             $this->info("✅ Role already exists in auth.php");
             return;
         }
 
-        // البحث عن مكان إضافة الـ roles
-        if (str_contains($content, "'guards' => [")) {
-            $search = "'guards' => [";
-            $replace = "'guards' => [\n        '{$role}' => [\n            'driver' => 'session',\n            'provider' => 'users',\n        ],";
+        $guardsPattern = '/\'guards\'\s*=>\s*\[([\s\S]*?)\],/';
 
-            $content = str_replace($search, $replace, $content);
+        if (preg_match($guardsPattern, $content, $matches)) {
+            $currentGuards = $matches[1];
+            $newGuard = "\n        '{$role}' => [\n            'driver' => 'session',\n            'provider' => 'users',\n        ]," . $currentGuards;
+
+            $content = str_replace($currentGuards, $newGuard, $content);
 
             if (File::put($authPath, $content) !== false) {
                 $this->info("✅ Added role guard to auth.php");
@@ -184,36 +259,52 @@ class {$name}
 
     protected function createRouteExample($name, $role)
     {
+        $this->info("\n🛣️  Creating Route Example...");
+
         $routesPath = base_path('routes/api.php');
         $middlewareName = $this->getMiddlewareName($name);
 
         if (!File::exists($routesPath)) {
-            $this->warn("⚠️ routes/api.php not found, skipping route example...");
-            return;
+            $routesPath = base_path('routes/web.php');
+            if (!File::exists($routesPath)) {
+                $this->warn("⚠️ routes files not found, skipping route example...");
+                return;
+            }
         }
 
         $routeExample = "\n\n// {$name} Middleware Routes Example\nRoute::middleware('{$middlewareName}')->group(function () {\n    // Routes for {$role} role only\n    Route::get('/{$role}/dashboard', function () {\n        return response()->json(['message' => 'Welcome {$role}!']);\n    });\n});";
 
         if (File::append($routesPath, $routeExample) !== false) {
-            $this->info("✅ Added route example to routes/api.php");
+            $this->info("✅ Added route example to " . basename($routesPath));
         } else {
-            $this->warn("⚠️ Could not add route example to routes/api.php");
+            $this->warn("⚠️ Could not add route example to " . basename($routesPath));
         }
     }
 
-    protected function getDefaultMessage($role)
+    protected function showSuccessSummary($name, $role, $message, $code, $field)
     {
-        $messages = [
-            'admin' => 'Administrator access required',
-            'manager' => 'Manager access required',
-            'user' => 'User access required',
-            'teacher' => 'Teacher access required',
-            'student' => 'Student access required',
-            'moderator' => 'Moderator access required',
-            'editor' => 'Editor access required'
-        ];
+        $middlewareName = $this->getMiddlewareName($name);
 
-        return $messages[$role] ?? "Access denied. {$role} role required";
+        $this->info("\n🎉 Middleware Generation Completed Successfully!");
+        $this->line("═══════════════════════════════════════");
+        $this->info("📋 Final Configuration:");
+        $this->line("   • Middleware: {$name}");
+        $this->line("   • Role: '{$role}'");
+        $this->line("   • Field: '{$field}'");
+        $this->line("   • Status Code: {$code}");
+        $this->line("   • Error Message: '{$message}'");
+        $this->line("═══════════════════════════════════════");
+        $this->info("💡 Usage Example:");
+        $this->line("Route::middleware('{$middlewareName}')->group(function () {");
+        $this->line("    Route::get('/admin/dashboard', [DashboardController::class, 'admin']);");
+        $this->line("    Route::get('/admin/users', [UserController::class, 'index']);");
+        $this->line("});");
+        $this->line("═══════════════════════════════════════");
+        $this->info("🔧 Next Steps:");
+        $this->line("   1. Run: php artisan route:list");
+        $this->line("   2. Test your middleware with different user roles");
+        $this->line("   3. Add more routes protected by this middleware");
+        $this->line("═══════════════════════════════════════\n");
     }
 
     protected function getMiddlewareName($name)
