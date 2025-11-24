@@ -136,7 +136,7 @@ class GenerateMiddlewareCommand extends Command
     {
         $this->info("\n📁 Creating Middleware File...");
 
-        $middlewarePath = app_path('Http/Middleware/' . $name . '.php');
+        $middlewarePath = app_path('Http/Middleware/' . $name . 'Middleware.php');
         $directory = dirname($middlewarePath);
 
         if (!File::exists($directory)) {
@@ -162,7 +162,6 @@ class GenerateMiddlewareCommand extends Command
 
     protected function buildMiddlewareContent($name, $role, $message, $code, $field, $isBoolean = false)
     {
-        // بناء الشرط بناءً على نوع الحقل
         if ($isBoolean) {
             $condition = "\$request->user() && \$request->user()->{$field} === true";
             $comment = "Check if user has {$field} = true";
@@ -179,7 +178,7 @@ use Closure;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
-class {$name}
+class {$name}Middleware
 {
     /**
      * Handle an incoming request.
@@ -214,7 +213,6 @@ class {$name}
         $content = File::get($kernelPath);
         $middlewareName = $this->getMiddlewareName($name);
 
-        // التحقق إذا كان الميدلوير مسجل مسبقاً
         if (str_contains($content, "'{$middlewareName}' =>")) {
             $this->info("✅ Middleware already registered in Kernel.php");
             return;
@@ -222,7 +220,6 @@ class {$name}
 
         $middlewareRegistered = false;
 
-        // المحاولة 1: البحث في $middlewareAliases (لإصدارات Laravel الحديثة)
         if (preg_match('/(protected\s+\$middlewareAliases\s*=\s*\[)([^\]]*)(\];)/s', $content, $matches)) {
             $middlewareRegistered = true;
             $before = $matches[1];
@@ -233,7 +230,7 @@ class {$name}
             if (!empty(trim($middlewareList))) {
                 $newMiddlewareList .= "\n        ";
             }
-            $newMiddlewareList .= "'{$middlewareName}' => \\App\\Http\\Middleware\\{$name}::class,";
+            $newMiddlewareList .= "'{$middlewareName}' => \\App\\Http\\Middleware\\{$name}Middleware::class,";
 
             $newContent = str_replace($matches[0], $before . $newMiddlewareList . $after, $content);
 
