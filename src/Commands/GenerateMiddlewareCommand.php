@@ -27,10 +27,8 @@ class GenerateMiddlewareCommand extends Command
         $this->info("🚀 Starting {$name} Middleware Generation...");
 
         try {
-            // عرض المعلومات التوضيحية أولاً
             $this->showGenerationInfo($name, $role, $code, $field);
 
-            // طلب التأكيد قبل المتابعة
             if (!$this->confirm('Do you want to continue with the generation?')) {
                 $this->info('❌ Generation cancelled.');
                 return 0;
@@ -201,21 +199,58 @@ class {$name}
             return;
         }
 
-        $routeMiddlewarePattern = '/protected\s+\$routeMiddleware\s*=\s*\[([\s\S]*?)\];/';
+        $routeMiddlewareFound = false;
 
-        if (preg_match($routeMiddlewarePattern, $content, $matches)) {
-            $currentMiddleware = $matches[1];
-            $newMiddleware = $currentMiddleware . "\n        '{$middlewareName}' => \\App\\Http\\Middleware\\{$name}::class,";
+        if (preg_match('/(protected\s+\$routeMiddleware\s*=\s*\[)([^\]]*)(\];)/s', $content, $matches)) {
+            $routeMiddlewareFound = true;
+            $before = $matches[1];
+            $middlewareList = $matches[2];
+            $after = $matches[3];
 
-            $content = str_replace($currentMiddleware, $newMiddleware, $content);
+            $newMiddlewareList = $middlewareList;
+            if (!empty(trim($middlewareList))) {
+                $newMiddlewareList .= "\n        ";
+            }
+            $newMiddlewareList .= "'{$middlewareName}' => \\App\\Http\\Middleware\\{$name}::class,";
 
-            if (File::put($kernelPath, $content) !== false) {
+            $newContent = str_replace($matches[0], $before . $newMiddlewareList . $after, $content);
+        }
+
+        elseif (preg_match('/(\$routeMiddleware\s*=\s*\[)([^\]]*)(\];)/s', $content, $matches)) {
+            $routeMiddlewareFound = true;
+            $before = $matches[1];
+            $middlewareList = $matches[2];
+            $after = $matches[3];
+
+            $newMiddlewareList = $middlewareList;
+            if (!empty(trim($middlewareList))) {
+                $newMiddlewareList .= "\n        ";
+            }
+            $newMiddlewareList .= "'{$middlewareName}' => \\App\\Http\\Middleware\\{$name}::class,";
+
+            $newContent = str_replace($matches[0], $before . $newMiddlewareList . $after, $content);
+        }
+        else {
+            $this->warn("⚠️ Could not find routeMiddleware array in Kernel.php, adding it manually...");
+
+            if (preg_match('/(class\s+Kernel\s+extends\s+[^{]+\{[\s\S]*?)(protected\s+\$middleware\s*=)/', $content, $matches)) {
+                $before = $matches[1];
+                $after = $matches[2];
+
+                $routeMiddlewareCode = "    protected \$routeMiddleware = [\n        '{$middlewareName}' => \\App\\Http\\Middleware\\{$name}::class,\n    ];\n\n    ";
+                $newContent = str_replace($matches[0], $before . $routeMiddlewareCode . $after, $content);
+                $routeMiddlewareFound = true;
+            }
+        }
+
+        if ($routeMiddlewareFound && isset($newContent)) {
+            if (File::put($kernelPath, $newContent) !== false) {
                 $this->info("✅ Registered middleware in Kernel.php");
             } else {
                 $this->warn("⚠️ Could not register middleware in Kernel.php");
             }
         } else {
-            $this->warn("⚠️ Could not find routeMiddleware array in Kernel.php");
+            $this->warn("⚠️ Could not find or create routeMiddleware array in Kernel.php");
             $this->warn("💡 Please manually register the middleware in app/Http/Kernel.php:");
             $this->line("'{$middlewareName}' => \\App\\Http\\Middleware\\{$name}::class,");
         }
@@ -239,21 +274,48 @@ class {$name}
             return;
         }
 
-        $guardsPattern = '/\'guards\'\s*=>\s*\[([\s\S]*?)\],/';
+        $guardsFound = false;
 
-        if (preg_match($guardsPattern, $content, $matches)) {
-            $currentGuards = $matches[1];
-            $newGuard = "\n        '{$role}' => [\n            'driver' => 'session',\n            'provider' => 'users',\n        ]," . $currentGuards;
+        if (preg_match('/(\'guards\'\s*=>\s*\[)([^\]]*)(\],)/s', $content, $matches)) {
+            $guardsFound = true;
+            $before = $matches[1];
+            $guardsList = $matches[2];
+            $after = $matches[3];
 
-            $content = str_replace($currentGuards, $newGuard, $content);
+            $newGuardsList = $guardsList;
+            if (!empty(trim($guardsList))) {
+                $newGuardsList .= "\n        ";
+            }
+            $newGuardsList .= "'{$role}' => [\n            'driver' => 'session',\n            'provider' => 'users',\n        ],";
 
-            if (File::put($authPath, $content) !== false) {
+            $newContent = str_replace($matches[0], $before . $newGuardsList . $after, $content);
+        }
+        else {
+            $this->warn("⚠️ Could not find guards section in auth.php, adding it manually...");
+
+            if (preg_match('/(return\s+\[)([\s\S]*?)(\];)/', $content, $matches)) {
+                $before = $matches[1];
+                $configArray = $matches[2];
+                $after = $matches[3];
+
+                $guardsCode = "\n    'guards' => [\n        '{$role}' => [\n            'driver' => 'session',\n            'provider' => 'users',\n        ],\n        'web' => [\n            'driver' => 'session',\n            'provider' => 'users',\n        ],\n    ],";
+
+                if (!str_contains($configArray, "'guards'")) {
+                    $newConfigArray = $configArray . $guardsCode;
+                    $newContent = str_replace($matches[0], $before . $newConfigArray . $after, $content);
+                    $guardsFound = true;
+                }
+            }
+        }
+
+        if ($guardsFound && isset($newContent)) {
+            if (File::put($authPath, $newContent) !== false) {
                 $this->info("✅ Added role guard to auth.php");
             } else {
                 $this->warn("⚠️ Could not update auth.php");
             }
         } else {
-            $this->warn("⚠️ Could not find guards section in auth.php");
+            $this->warn("⚠️ Could not find or create guards section in auth.php");
         }
     }
 
